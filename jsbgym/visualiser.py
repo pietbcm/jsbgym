@@ -323,7 +323,7 @@ class FlightGearVisualiser(object):
     FLIGHTGEAR_TIME_FACTOR = 1  # sim speed relative to realtime, higher is faster
 
     def __init__(
-        self, sim: Simulation, print_props: Tuple[prp.Property], block_until_loaded=True
+        self, sim: Simulation, print_props: Tuple[prp.Property], block_until_loaded=False
     ):
         """
         Launches FlightGear in subprocess and starts figure for plotting actions.
@@ -338,8 +338,8 @@ class FlightGearVisualiser(object):
         self.print_props = print_props
         self.flightgear_process = self._launch_flightgear(sim.get_aircraft())
         self.figure = FigureVisualiser(sim, print_props)
-        if block_until_loaded:
-            self._block_until_flightgear_loaded()
+        # if block_until_loaded:
+        #     self._block_until_flightgear_loaded()
 
     def plot(self, sim: Simulation) -> None:
         """
