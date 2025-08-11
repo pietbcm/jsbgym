@@ -25,7 +25,7 @@ for env_id, (
         entry_point = "jsbgym.environment:JsbSimEnv"
     else:
         entry_point = "jsbgym.environment:NoFGJsbSimEnv"
-    kwargs = dict(aircraft=plane, task_type=task, shaping=shaping)
+    kwargs = dict(aircraft=plane, task_type=task, shaping=shaping, agent_interaction_freq=1)
     gym.envs.registration.register(id=env_id, entry_point=entry_point, kwargs=kwargs)
 
 # make an Enum storing every Gym-JSBSim environment ID for convenience and value safety
