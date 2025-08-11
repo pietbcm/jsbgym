@@ -22,7 +22,7 @@ class JsbSimEnv(gym.Env):
     docstrings have been adapted or copied from the OpenAI Gym source code then migrated to work with the gymnasium interface.
     """
 
-    JSBSIM_DT_HZ: int = 60  # JSBSim integration frequency
+    JSBSIM_DT_HZ: int = 10  # JSBSim integration frequency
     metadata = {
         "render_modes": ["human", "flightgear", "human_fg", "graph", "graph_fg"],
         "render_fps": 60,
@@ -32,7 +32,7 @@ class JsbSimEnv(gym.Env):
         self,
         aircraft: Aircraft = c172,
         task_type: Type = HeadingControlTask,
-        agent_interaction_freq: int = 5,
+        agent_interaction_freq: int = 2,
         shaping: Shaping = Shaping.STANDARD,
         render_mode: Optional[str] = None,
     ):

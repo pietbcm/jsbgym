@@ -490,3 +490,141 @@ class TurnHeadingControlTask(HeadingControlTask):
     def _get_target_track(self) -> float:
         # select a random heading each episode
         return random.uniform(self.target_track_deg.min, self.target_track_deg.max)
+    
+
+class AltitudeHoldTask(FlightTask):
+    """
+    A task in where the agent must use engine thrust to maintain the starting
+    altitude
+    """
+
+    MIXTURE_CMD = 0.8
+    INITIAL_HEADING_DEG = 270
+    DEFAULT_EPISODE_TIME_S = 60.0
+    ALTITUDE_SCALING_FT = 150
+    TRACK_ERROR_SCALING_DEG = 8
+    ROLL_ERROR_SCALING_RAD = 0.15  # approx. 8 deg
+    SIDESLIP_ERROR_SCALING_DEG = 3.0
+    MIN_STATE_QUALITY = 0.0  # terminate if state 'quality' is less than this
+    MAX_ALTITUDE_DEVIATION_FT = 3000  # terminate if altitude error exceeds this
+    target_track_deg = BoundedProperty(
+        "target/track-deg",
+        "desired heading [deg]",
+        prp.heading_deg.min,
+        prp.heading_deg.max,
+    )
+    track_error_deg = BoundedProperty(
+        "error/track-error-deg", "error to desired track [deg]", -180, 180
+    )
+    altitude_error_ft = BoundedProperty(
+        "error/altitude-error-ft",
+        "error to desired altitude [ft]",
+        prp.altitude_sl_ft.min,
+        prp.altitude_sl_ft.max,
+    )
+
+    # Use left and right engine throttle as control actions
+    action_variables = (prp.throttle_0_cmd, prp.throttle_1_cmd)
+    # action_variables = (prp.throttle_1_cmd)
+
+    def __init__(
+        self,
+        shaping_type: Shaping,
+        step_frequency_hz: float,
+        aircraft: Aircraft,
+        episode_time_s: float = DEFAULT_EPISODE_TIME_S,
+        positive_rewards: bool = True,
+    ):
+        self.max_time_s = episode_time_s
+        episode_steps = math.ceil(self.max_time_s * step_frequency_hz)
+        self.steps_left = BoundedProperty(
+            "info/steps_left", "steps remaining in episode", 0, episode_steps
+        )
+        self.aircraft = aircraft
+        self.positive_rewards = positive_rewards
+
+        self.extra_state_variables = (
+            self.altitude_error_ft,
+            # prp.eng_1_n1,
+            # prp.eng_2_n1
+        )
+        self.state_variables = FlightTask.base_state_variables + self.extra_state_variables
+
+        assessor = self.make_assessor(shaping_type)
+        super().__init__(assessor)
+
+    def make_assessor(self, shaping: Shaping) -> assessors.AssessorImpl:
+        return assessors.AssessorImpl(
+            self._make_base_reward_components(),
+            (),
+            positive_rewards=self.positive_rewards,
+        )
+
+    def _make_base_reward_components(self) -> Tuple[rewards.RewardComponent, ...]:
+        return (
+            rewards.AsymptoticErrorComponent(
+                name="altitude_error",
+                prop=self.altitude_error_ft,
+                state_variables=self.state_variables,
+                target=0.0,
+                is_potential_based=False,
+                scaling_factor=self.ALTITUDE_SCALING_FT,
+            ),
+        )
+
+    def get_initial_conditions(self) -> Dict[Property, float]:
+        return {
+            **self.base_initial_conditions,
+            prp.initial_u_fps: self.aircraft.get_cruise_speed_fps(),
+            prp.initial_v_fps: 0,
+            prp.initial_w_fps: 0,
+            prp.initial_p_radps: 0,
+            prp.initial_q_radps: 0,
+            prp.initial_r_radps: 0,
+            prp.initial_roc_fpm: 0,
+        }
+
+    def _update_custom_properties(self, sim: Simulation) -> None:
+        altitude_ft = sim[prp.altitude_sl_ft]
+        error_ft = altitude_ft - self._get_target_altitude()
+        sim[self.altitude_error_ft] = error_ft
+        sim[self.steps_left] -= 1
+
+    def _is_terminal(self, sim: Simulation) -> bool:
+        return (
+            sim[self.steps_left] <= 0
+            or sim[self.last_assessment_reward] < self.MIN_STATE_QUALITY
+            or abs(sim[self.altitude_error_ft]) > self.MAX_ALTITUDE_DEVIATION_FT
+        )
+
+    def _get_target_altitude(self) -> float:
+        return self.INITIAL_ALTITUDE_FT
+
+    def _get_out_of_bounds_reward(self, sim: Simulation) -> rewards.Reward:
+        reward_scalar = (1 + sim[self.steps_left]) * -1.0
+        return RewardStub(reward_scalar, reward_scalar)
+
+    def _reward_terminal_override(
+        self, reward: rewards.Reward, sim: Simulation
+    ) -> rewards.Reward:
+        if abs(sim[self.altitude_error_ft]) > self.MAX_ALTITUDE_DEVIATION_FT and not self.positive_rewards:
+            return self._get_out_of_bounds_reward(sim)
+        return reward
+
+    def _new_episode_init(self, sim: Simulation) -> None:
+        super()._new_episode_init(sim)
+        # Initialize both engines equally to start in balance
+        sim.set_throttle_mixture_controls(0.8, self.MIXTURE_CMD)
+        sim[self.steps_left] = self.steps_left.max
+
+    def get_props_to_output(self) -> Tuple:
+        return (
+            prp.u_fps,
+            prp.altitude_sl_ft,
+            self.altitude_error_ft,
+            self.last_agent_reward,
+            self.last_assessment_reward,
+            self.steps_left,
+        )
+
+
