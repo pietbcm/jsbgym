@@ -17,6 +17,13 @@ class AxesTuple(NamedTuple):
     axes_throttle: plt.Axes
     axes_rudder: plt.Axes
 
+class AxesTupleDoubleThrottle(NamedTuple):
+    axes_state: plt.Axes
+    axes_stick: plt.Axes
+    axes_throttle1: plt.Axes
+    axes_throttle2: plt.Axes
+    axes_rudder: plt.Axes
+
 
 class FigureVisualiser(object):
     """Class for manging a matplotlib Figure displaying agent state and actions"""
@@ -33,7 +40,7 @@ class FigureVisualiser(object):
     TEXT_Y_POSN_INITIAL = 1.0
     TEXT_Y_INCREMENT = -0.1
 
-    def __init__(self, _: Simulation, print_props: Tuple[prp.Property]):
+    def __init__(self, _: Simulation, print_props: Tuple[prp.Property], double_throttle: bool = False):
         """
         Constructor.
         Sets here is ft_per_deg_lon, which depends dynamically on aircraft's
@@ -46,8 +53,15 @@ class FigureVisualiser(object):
         """
         self.print_props = print_props
         self.figure: plt.Figure = None
-        self.axes: AxesTuple = None
         self.value_texts: Tuple[plt.Text] = None
+
+        if not double_throttle:
+            self.axes: AxesTuple = None
+            self.double_throttle = False
+        else:
+            self.axes: AxesTupleDoubleThrottle = None
+            self.double_throttle = True
+        
 
     def plot(self, sim: Simulation) -> None:
         """
@@ -87,18 +101,31 @@ class FigureVisualiser(object):
         plt.ion()  # interactive mode allows dynamic updating of plot
         figure = plt.figure(figsize=(6, 11))
 
-        spec = plt.GridSpec(
-            nrows=3,
-            ncols=2,
-            width_ratios=[5, 1],  # second column very thin
-            height_ratios=[6, 5, 1],  # bottom row very short
-            wspace=0.3,
-        )
+        if not self.double_throttle:
+            spec = plt.GridSpec(
+                nrows=3,
+                ncols=2,
+                width_ratios=[5, 1],  # second column very thin
+                height_ratios=[6, 5, 1],  # bottom row very short
+                wspace=0.3,
+            )
+
+            axes_throttle = figure.add_subplot(spec[1, 1])
+        else:
+            spec = plt.GridSpec(
+                nrows=3,
+                ncols=3,
+                width_ratios=[5, 1, 1],  # second column very thin
+                height_ratios=[6, 5, 1],  # bottom row very short
+                wspace=0.3,
+            )
+
+            axes_throttle1 = figure.add_subplot(spec[1, 1])
+            axes_throttle2 = figure.add_subplot(spec[1, 2])
 
         # create subplots
         axes_state = figure.add_subplot(spec[0, 0:])
         axes_stick = figure.add_subplot(spec[1, 0])
-        axes_throttle = figure.add_subplot(spec[1, 1])
         axes_rudder = figure.add_subplot(spec[2, 0])
 
         # hide state subplot axes - text will be printed to it
@@ -132,18 +159,46 @@ class FigureVisualiser(object):
         axes_stick.spines["top"].set_visible(False)
 
         # config subplot for throttle: a 1D vertical plot
-        axes_throttle.set_ylabel("throttle [-]")
-        axes_throttle.set_ylim(bottom=0, top=1)
-        axes_throttle.set_xlim(left=0, right=1)
-        axes_throttle.spines["left"].set_position("zero")
-        axes_throttle.yaxis.set_label_coords(0.5, 0.5)
-        axes_throttle.set_yticks([0, 0.5, 1])
-        axes_throttle.yaxis.set_minor_locator(minor_locator)
-        axes_throttle.tick_params(axis="y", which="both", direction="inout")
-        # hide horizontal x-axis and related spines
-        axes_throttle.xaxis.set_visible(False)
-        for spine in ["right", "bottom", "top"]:
-            axes_throttle.spines[spine].set_visible(False)
+        if not self.double_throttle:
+            axes_throttle.set_ylabel("throttle [-]")
+            axes_throttle.set_ylim(bottom=0, top=1)
+            axes_throttle.set_xlim(left=0, right=1)
+            axes_throttle.spines["left"].set_position("zero")
+            axes_throttle.yaxis.set_label_coords(0.5, 0.5)
+            axes_throttle.set_yticks([0, 0.5, 1])
+            axes_throttle.yaxis.set_minor_locator(minor_locator)
+            axes_throttle.tick_params(axis="y", which="both", direction="inout")
+            # hide horizontal x-axis and related spines
+            axes_throttle.xaxis.set_visible(False)
+            for spine in ["right", "bottom", "top"]:
+                axes_throttle.spines[spine].set_visible(False)
+
+        else:
+            axes_throttle1.set_ylabel("throttle 1 [-]")
+            axes_throttle1.set_ylim(bottom=0, top=1)
+            axes_throttle1.set_xlim(left=0, right=1)
+            axes_throttle1.spines["left"].set_position("zero")
+            axes_throttle1.yaxis.set_label_coords(0.5, 0.5)
+            axes_throttle1.set_yticks([0, 0.5, 1])
+            axes_throttle1.yaxis.set_minor_locator(minor_locator)
+            axes_throttle1.tick_params(axis="y", which="both", direction="inout")
+            # hide horizontal x-axis and related spines
+            axes_throttle1.xaxis.set_visible(False)
+            for spine in ["right", "bottom", "top"]:
+                axes_throttle1.spines[spine].set_visible(False)
+
+            axes_throttle2.set_ylabel("throttle 2 [-]")
+            axes_throttle2.set_ylim(bottom=0, top=1)
+            axes_throttle2.set_xlim(left=0, right=1)
+            axes_throttle2.spines["left"].set_position("zero")
+            axes_throttle2.yaxis.set_label_coords(0.5, 0.5)
+            axes_throttle2.set_yticks([0, 0.5, 1])
+            axes_throttle2.yaxis.set_minor_locator(minor_locator)
+            axes_throttle2.tick_params(axis="y", which="both", direction="inout")
+            # hide horizontal x-axis and related spines
+            axes_throttle2.xaxis.set_visible(False)
+            for spine in ["right", "bottom", "top"]:
+                axes_throttle2.spines[spine].set_visible(False)
 
         # config rudder subplot: 1D horizontal plot
         axes_rudder.set_xlabel("rudder [-]")
@@ -158,12 +213,21 @@ class FigureVisualiser(object):
         for spine in ["left", "right", "top"]:
             axes_rudder.spines[spine].set_visible(False)
 
-        all_axes = AxesTuple(
-            axes_state=axes_state,
-            axes_stick=axes_stick,
-            axes_throttle=axes_throttle,
-            axes_rudder=axes_rudder,
-        )
+        if not self.double_throttle:
+            all_axes = AxesTuple(
+                axes_state=axes_state,
+                axes_stick=axes_stick,
+                axes_throttle=axes_throttle,
+                axes_rudder=axes_rudder,
+            )
+        else:
+            all_axes = AxesTupleDoubleThrottle(
+                axes_state=axes_state,
+                axes_stick=axes_stick,
+                axes_throttle1=axes_throttle1,
+                axes_throttle2=axes_throttle2,
+                axes_rudder=axes_rudder,
+            )
 
         # create figure-wide legend
         cmd_entry = (
@@ -223,21 +287,39 @@ class FigureVisualiser(object):
         for prop, text in zip(self.print_props, self.value_texts):
             text.set_text(f"{sim[prop]:.4g}")
 
-    def _plot_control_states(self, sim: Simulation, all_axes: AxesTuple):
-        control_surfaces = [prp.aileron_left, prp.elevator, prp.throttle, prp.rudder]
-        ail, ele, thr, rud = [sim[control] for control in control_surfaces]
+            control_surfaces = [prp.aileron_left, prp.elevator, prp.throttle_1, prp.throttle_2, prp.rudder]
+            ail, ele, thr1, thr2, rud = [sim[control] for control in control_surfaces]
+
+    def _plot_control_states(self, sim: Simulation, all_axes):
+        if not self.double_throttle:
+            control_surfaces = [prp.aileron_left, prp.elevator, prp.throttle, prp.rudder]
+            ail, ele, thr, rud = [sim[control] for control in control_surfaces]
+
+            all_axes.axes_throttle.plot(
+                [0], [thr], "r+", mfc="none", markersize=10, clip_on=False
+            )
+        else:
+            control_surfaces = [prp.aileron_left, prp.elevator, prp.throttle_1, prp.throttle_2, prp.rudder]
+            ail, ele, thr1, thr2, rud = [sim[control] for control in control_surfaces]
+
+            all_axes.axes_throttle1.plot(
+                [0], [thr1], "r+", mfc="none", markersize=10, clip_on=False
+            )
+
+            all_axes.axes_throttle2.plot(
+                [0], [thr2], "r+", mfc="none", markersize=10, clip_on=False
+            )
+
         # plot aircraft control surface positions
         all_axes.axes_stick.plot(
             [ail], [ele], "r+", mfc="none", markersize=10, clip_on=False
         )
-        all_axes.axes_throttle.plot(
-            [0], [thr], "r+", mfc="none", markersize=10, clip_on=False
-        )
+
         all_axes.axes_rudder.plot(
             [rud], [0], "r+", mfc="none", markersize=10, clip_on=False
         )
 
-    def _plot_control_commands(self, sim: Simulation, all_axes: AxesTuple):
+    def _plot_control_commands(self, sim: Simulation, all_axes):
         """
         Plots agent-commanded actions on the environment figure.
         :param sim: Simulation to plot control commands from
@@ -245,14 +327,28 @@ class FigureVisualiser(object):
         """
         ail_cmd = sim[prp.aileron_cmd]
         ele_cmd = sim[prp.elevator_cmd]
-        thr_cmd = sim[prp.throttle_cmd]
         rud_cmd = sim[prp.rudder_cmd]
+
+        if not self.double_throttle:
+            thr_cmd = sim[prp.throttle_cmd]
+
+            all_axes.axes_throttle.plot(
+                [0], [thr_cmd], "bo", mfc="none", markersize=10, clip_on=False
+            )
+        else:
+            thr1_cmd = sim[prp.throttle_1_cmd]
+            thr2_cmd = sim[prp.throttle_2_cmd]
+
+            all_axes.axes_throttle1.plot(
+                [0], [thr1_cmd], "bo", mfc="none", markersize=10, clip_on=False
+            )
+
+            all_axes.axes_throttle2.plot(
+                [0], [thr2_cmd], "bo", mfc="none", markersize=10, clip_on=False
+            )
 
         all_axes.axes_stick.plot(
             [ail_cmd], [ele_cmd], "bo", mfc="none", markersize=10, clip_on=False
-        )
-        all_axes.axes_throttle.plot(
-            [0], [thr_cmd], "bo", mfc="none", markersize=10, clip_on=False
         )
         all_axes.axes_rudder.plot(
             [rud_cmd], [0], "bo", mfc="none", markersize=10, clip_on=False
@@ -323,7 +419,7 @@ class FlightGearVisualiser(object):
     FLIGHTGEAR_TIME_FACTOR = 1  # sim speed relative to realtime, higher is faster
 
     def __init__(
-        self, sim: Simulation, print_props: Tuple[prp.Property], block_until_loaded=False
+        self, sim: Simulation, print_props: Tuple[prp.Property], block_until_loaded=False, double_throttle=False
     ):
         """
         Launches FlightGear in subprocess and starts figure for plotting actions.
@@ -337,7 +433,7 @@ class FlightGearVisualiser(object):
         self.configure_simulation_output(sim)
         self.print_props = print_props
         self.flightgear_process = self._launch_flightgear(sim.get_aircraft())
-        self.figure = FigureVisualiser(sim, print_props)
+        self.figure = FigureVisualiser(sim, print_props, double_throttle=double_throttle)
         # if block_until_loaded:
         #     self._block_until_flightgear_loaded()
 

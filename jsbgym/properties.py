@@ -80,6 +80,15 @@ rudder = BoundedProperty("fcs/rudder-pos-norm", "rudder position, normalised", -
 throttle = BoundedProperty(
     "fcs/throttle-pos-norm", "throttle position, normalised", 0, 1
 )
+# throttle_1 = BoundedProperty(
+#     "fcs/throttle-pos-norm[0]", "throttle 1 position, normalised", 0, 1
+# )
+throttle_1 = BoundedProperty(
+    "fcs/throttle-pos-norm", "throttle 1 position, normalised", 0, 1
+)
+throttle_2 = BoundedProperty(
+    "fcs/throttle-pos-norm[1]", "throttle 2 position, normalised", 0, 1
+)
 gear = BoundedProperty("gear/gear-pos-norm", "landing gear position, normalised", 0, 1)
 
 eng_1_n1 = BoundedProperty("engines/engine[0]/n1", "n1 for 1st engine", 0, 100)
@@ -108,10 +117,13 @@ throttle_cmd = BoundedProperty(
 mixture_cmd = BoundedProperty(
     "fcs/mixture-cmd-norm", "engine mixture setting, normalised", 0.0, 1.0
 )
-throttle_0_cmd = BoundedProperty(
-    "fcs/throttle-cmd-norm[0]", "throttle 0 commanded position, normalised", 0.0, 1.0
-)
+# throttle_1_cmd = BoundedProperty(
+#     "fcs/throttle-cmd-norm[0]", "throttle 0 commanded position, normalised", 0.0, 1.0
+# )
 throttle_1_cmd = BoundedProperty(
+    "fcs/throttle-cmd-norm", "throttle 0 commanded position, normalised", 0.0, 1.0
+)
+throttle_2_cmd = BoundedProperty(
     "fcs/throttle-cmd-norm[1]", "throttle 1 commanded position, normalised", 0.0, 1.0
 )
 mixture_1_cmd = BoundedProperty(

@@ -1,6 +1,6 @@
 import gymnasium as gym
 import numpy as np
-from jsbgym.tasks import Shaping, HeadingControlTask
+from jsbgym.tasks import Shaping, HeadingControlTask, AltitudeHoldTask, HdotHoldTask
 from jsbgym.simulation import Simulation
 from jsbgym.visualiser import FigureVisualiser, FlightGearVisualiser, GraphVisualiser
 from jsbgym.aircraft import Aircraft, c172
@@ -32,7 +32,7 @@ class JsbSimEnv(gym.Env):
         self,
         aircraft: Aircraft = c172,
         task_type: Type = HeadingControlTask,
-        agent_interaction_freq: int = 2,
+        agent_interaction_freq: float = 2,
         shaping: Shaping = Shaping.STANDARD,
         render_mode: Optional[str] = None,
     ):
@@ -54,7 +54,7 @@ class JsbSimEnv(gym.Env):
                 f"{self.JSBSIM_DT_HZ} Hz."
             )
         self.sim: Simulation = None
-        self.sim_steps_per_agent_step: int = self.JSBSIM_DT_HZ // agent_interaction_freq
+        self.sim_steps_per_agent_step: int = int(self.JSBSIM_DT_HZ // agent_interaction_freq)
         self.aircraft = aircraft
         self.task = task_type(shaping, agent_interaction_freq, aircraft)
         # set Space objects
@@ -147,6 +147,8 @@ class JsbSimEnv(gym.Env):
                 f'e.g. gym.make("{self.spec.id}", render_mode="human")'
             )
             return
+        
+        double_throttle = isinstance(self.task, AltitudeHoldTask) or isinstance(self.task, HdotHoldTask)
 
         """Renders the environment.
         The set of supported modes varies per environment. (And some
@@ -173,7 +175,7 @@ class JsbSimEnv(gym.Env):
         if self.render_mode == "human":
             if not self.figure_visualiser:
                 self.figure_visualiser = FigureVisualiser(
-                    self.sim, self.task.get_props_to_output()
+                    self.sim, self.task.get_props_to_output(), double_throttle=double_throttle
                 )
             self.figure_visualiser.plot(self.sim)
         elif self.render_mode == "flightgear":
@@ -184,7 +186,7 @@ class JsbSimEnv(gym.Env):
         elif self.render_mode == "human_fg":
             if not self.flightgear_visualiser:
                 self.flightgear_visualiser = FlightGearVisualiser(
-                    self.sim, self.task.get_props_to_output(), flightgear_blocking
+                    self.sim, self.task.get_props_to_output(), flightgear_blocking, double_throttle=double_throttle
                 )
             self.flightgear_visualiser.plot(self.sim)
         elif self.render_mode == "graph":
