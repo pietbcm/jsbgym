@@ -65,6 +65,19 @@ r_radps = BoundedProperty(
     "velocities/r-rad_sec", "yaw rate [rad/s]", -2 * math.pi, 2 * math.pi
 )
 altitude_rate_fps = Property("velocities/h-dot-fps", "Rate of altitude change [ft/s]")
+psidot_rads = Property("velocities/psidot-rad_sec", "Rate of heading change [rad/s]")
+
+# Accelerations
+ax_fps2 = BoundedProperty(
+    "accelerations/a-pilot-x-ft_sec2", "pilot frame x-axis acceleration [ft/s]", -2200, 2200
+)
+ay_fps2 = BoundedProperty(
+    "accelerations/a-pilot-y-ft_sec2", "pilot frame y-axis acceleration [ft/s]", -2200, 2200
+)
+az_fps2 = BoundedProperty(
+    "accelerations/a-pilot-z-ft_sec2", "pilot frame z-axis acceleration [ft/s]", -2200, 2200
+)
+
 
 # controls state
 aileron_left = BoundedProperty(

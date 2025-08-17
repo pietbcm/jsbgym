@@ -94,6 +94,8 @@ class FlightTask(Task, ABC):
         (optional) _update_custom_properties: updates any custom properties in the sim
     """
 
+    task_name = "DefaultFlightTask"
+
     INITIAL_ALTITUDE_FT = 5000
     base_state_variables = (
         prp.altitude_sl_ft,
@@ -250,6 +252,8 @@ class HeadingControlTask(FlightTask):
     A task in which the agent must perform steady, level flight maintaining its
     initial heading.
     """
+
+    task_name = "HeadingControlTask"
 
     THROTTLE_CMD = 0.8
     MIXTURE_CMD = 0.8
@@ -481,6 +485,8 @@ class TurnHeadingControlTask(HeadingControlTask):
     and fly level to a random target heading.
     """
 
+    task_name = "TurnHeadingControlTask"
+
     def get_initial_conditions(self) -> [Dict[Property, float]]:
         initial_conditions = super().get_initial_conditions()
         random_heading = random.uniform(prp.heading_deg.min, prp.heading_deg.max)
@@ -497,6 +503,8 @@ class AltitudeHoldTask(FlightTask):
     A task in where the agent must use engine thrust to maintain the starting
     altitude
     """
+
+    task_name = "AltitudeHoldTask"
 
     MIXTURE_CMD = 0.8
     INITIAL_HEADING_DEG = 270
@@ -632,6 +640,8 @@ class HdotHoldTask(FlightTask):
     A task in where the agent must use engine thrust to maintain a desired climb rate
     """
 
+    task_name = "HdotHoldTask"
+
     MIXTURE_CMD = 0.8
     INITIAL_HEADING_DEG = 270
     INITIAL_ALTITUDE_FT = 10000
@@ -639,39 +649,48 @@ class HdotHoldTask(FlightTask):
     DEFAULT_EPISODE_TIME_S = 240.0
     TARGET_HDOT_RANGE = 40.0
     HDOT_SCALING_FT = 150
-    TRACK_ERROR_SCALING_DEG = 8
-    ROLL_ERROR_SCALING_RAD = 0.15  # approx. 8 deg
-    SIDESLIP_ERROR_SCALING_DEG = 3.0
     MIN_STATE_QUALITY = 0.0  # terminate if state 'quality' is less than this
     MAX_ALTITUDE_DEVIATION_FT = 10000  # terminate if altitude error exceeds this
-    target_track_deg = BoundedProperty(
-        "target/track-deg",
-        "desired heading [deg]",
-        prp.heading_deg.min,
-        prp.heading_deg.max,
+    MAX_HDOT_ERROR = 200 # ft/s
+    MAX_PSIDOT_ERROR = 0.03 * math.pi
+
+    gamma = 0.8
+    kappa = 0.1e-6
+    w_hdot = 1
+    w_psidot = 30
+
+    target_psidot_rads = BoundedProperty(
+        "target/psidot-rad-sec",
+        "Desired heading rate [rad/sec]",
+        -0.5,
+        0.5,
     )
-    track_error_deg = BoundedProperty(
-        "error/track-error-deg", "error to desired track [deg]", -180, 180
+    psidot_error_rads = BoundedProperty(
+        "error/psidot-error-rads",
+        "error to desired heading rate [rad/s]",
+        -0.5,
+        0.5
     )
+
     target_hdot_fps = BoundedProperty(
         "target/hdot-fps",
         "desired hdot [fps]",
         -1500,
         1500
     )
+    hdot_error_fps = BoundedProperty(
+        "error/hdot-error-fps",
+        "error to desired altitude rate [ft]",
+        -TARGET_HDOT_RANGE,
+        TARGET_HDOT_RANGE
+    )
+    
     altitude_error_ft = BoundedProperty(
         "error/altitude-error-ft",
         "error to desired altitude [ft]",
         prp.altitude_sl_ft.min,
         prp.altitude_sl_ft.max,
     )
-
-    hdot_error_fps = BoundedProperty(
-        "error/hdot-error-fps",
-        "error to desired altitude rate [ft]",
-        -TARGET_HDOT_RANGE,
-        TARGET_HDOT_RANGE
-        )
 
     # Use left and right engine throttle as control actions
     action_variables = (prp.throttle_1_cmd, prp.throttle_2_cmd)
@@ -694,10 +713,15 @@ class HdotHoldTask(FlightTask):
 
         self.extra_state_variables = (
             self.hdot_error_fps,
+            self.psidot_error_rads,
         )
         self.state_variables = FlightTask.base_state_variables + self.extra_state_variables
 
         self.target_hdot = 0
+        self.target_psidot_rads = 0
+
+        self.prev_sim = None
+        self.reward_stats = {}
 
         assessor = self.make_assessor(shaping_type)
         super().__init__(assessor)
@@ -743,6 +767,10 @@ class HdotHoldTask(FlightTask):
         error_fps = self.target_hdot - hdot_fps
         sim[self.hdot_error_fps] = error_fps
 
+        psidot_rads = sim[prp.psidot_rads]
+        error_rads = self.target_psidot_rads - psidot_rads
+        sim[self.psidot_error_rads] = error_rads
+
         altitude_ft = sim[prp.altitude_sl_ft]
         error_ft = altitude_ft - self.INITIAL_ALTITUDE_FT
         sim[self.altitude_error_ft] = error_ft
@@ -782,3 +810,74 @@ class HdotHoldTask(FlightTask):
             self.last_assessment_reward,
             self.steps_left,
         )
+
+    def task_step(
+        self, sim: Simulation, action: Sequence[float], sim_steps: int
+    ) -> Tuple[NamedTuple, float, bool, Dict]:
+        # input actions
+        for prop, command in zip(self.action_variables, action):
+            sim[prop] = command
+
+        # run simulation
+        for _ in range(sim_steps):
+            sim.run()
+
+        self._update_custom_properties(sim)
+        state = self.State(*(sim[prop] for prop in self.state_variables))
+        terminated = self._is_terminal(sim)
+        truncated = False
+
+        reward = self.calculate_reward(sim)
+
+        if terminated:
+            reward = self._reward_terminal_override(reward, sim)
+        if self.debug:
+            self._validate_state(state, terminated, truncated, action, reward)
+
+        info = {"reward": reward}
+        # info["episode"] = self.reward_stats
+
+        self.prev_sim = sim
+
+        return state, reward, terminated, False, info
+
+    def calculate_reward(self, sim):
+        if self.prev_sim is None: self.prev_sim = sim
+
+        # Base reward
+        hdot_penalty = self.w_hdot * (sim[self.hdot_error_fps] / self.MAX_HDOT_ERROR)**2
+        psidot_penalty = self.w_psidot * (sim[self.psidot_error_rads] / self.MAX_PSIDOT_ERROR)**2
+        base_reward = -(hdot_penalty + psidot_penalty)
+        
+        # Potentials
+        phi_prev = self.potential(self.prev_sim)
+        phi_curr = self.potential(sim)
+        potential_reward = self.kappa * (self.gamma * phi_curr - phi_prev)
+        
+        shaped_reward = base_reward + potential_reward
+
+        self.reward_stats = {"base_hdot_rew": -hdot_penalty,
+                             "base_psidot_rew": -hdot_penalty,
+                             "base_rew": base_reward,
+                             "potential_rew": potential_reward
+        }
+
+        return shaped_reward
+    
+
+    def potential(self, sim):
+        g = 9.81
+        
+        V = math.sqrt(sim[prp.u_fps]**2 + sim[prp.v_fps]**2 + sim[prp.w_fps]**2)
+        Vdot = math.sqrt(sim[prp.ax_fps2]**2 + sim[prp.ay_fps2]**2 + sim[prp.az_fps2]**2)
+        hdot = sim[prp.altitude_rate_fps]
+
+        Edot     = g * hdot + V*Vdot
+        Edot_cmd = g * self.target_hdot
+
+        phi_long = -((Edot-Edot_cmd)/g)**2
+
+        return phi_long
+    
+    def set_gamma(self, gamma):
+        self.gamma = gamma

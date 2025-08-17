@@ -35,6 +35,7 @@ class JsbSimEnv(gym.Env):
         agent_interaction_freq: float = 2,
         shaping: Shaping = Shaping.STANDARD,
         render_mode: Optional[str] = None,
+        gamma: Optional[float] = None
     ):
         """
         Constructor. Inits some internal state, but JsbSimEnv.reset() must be
@@ -66,6 +67,8 @@ class JsbSimEnv(gym.Env):
         self.graph_visualiser: GraphVisualiser = None
         self.step_delay = None
         self.render_mode = render_mode
+
+        if gamma is not None: self.task.set_gamma(gamma)
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict]:
         if (
@@ -218,6 +221,13 @@ class JsbSimEnv(gym.Env):
             self.flightgear_visualiser.close()
         if self.graph_visualiser:
             self.graph_visualiser.close()
+
+    def set_gamma(self, gamma):
+        if self.task.task_name != "HdotHoldTask":
+            print("Gamma cannot be set this way for this task")
+            return
+
+        self.task.set_gamma(gamma)
 
 
 class NoFGJsbSimEnv(JsbSimEnv):
