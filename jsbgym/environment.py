@@ -1,6 +1,6 @@
 import gymnasium as gym
 import numpy as np
-from jsbgym.tasks import Shaping, HeadingControlTask, AltitudeHoldTask, HdotHoldTask
+from jsbgym.tasks import Shaping, HeadingControlTask, AltitudeHoldTask, HdotHoldTask, HeadingAndAltitudeRateTask
 from jsbgym.simulation import Simulation
 from jsbgym.visualiser import FigureVisualiser, FlightGearVisualiser, GraphVisualiser
 from jsbgym.aircraft import Aircraft, c172
@@ -22,10 +22,10 @@ class JsbSimEnv(gym.Env):
     docstrings have been adapted or copied from the OpenAI Gym source code then migrated to work with the gymnasium interface.
     """
 
-    JSBSIM_DT_HZ: int = 10  # JSBSim integration frequency
+    JSBSIM_DT_HZ: int = 20  # JSBSim integration frequency
     metadata = {
         "render_modes": ["human", "flightgear", "human_fg", "graph", "graph_fg"],
-        "render_fps": 60,
+        "render_fps": 30,
     }
 
     def __init__(
@@ -58,6 +58,7 @@ class JsbSimEnv(gym.Env):
         self.sim_steps_per_agent_step: int = int(self.JSBSIM_DT_HZ // agent_interaction_freq)
         self.aircraft = aircraft
         self.task = task_type(shaping, agent_interaction_freq, aircraft)
+        self.double_throttle = isinstance(self.task, AltitudeHoldTask) or isinstance(self.task, HdotHoldTask) or isinstance(HeadingAndAltitudeRateTask)
         # set Space objects
         self.observation_space: gym.spaces.Box = self.task.get_state_space()
         self.action_space: gym.spaces.Box = self.task.get_action_space()
@@ -68,7 +69,12 @@ class JsbSimEnv(gym.Env):
         self.step_delay = None
         self.render_mode = render_mode
 
-        if gamma is not None: self.task.set_gamma(gamma)
+        if gamma is not None:
+            # Then it's one of the new tasks using potential difference
+            self.task.set_gamma(gamma)
+            self.log_reward_stats = True
+        else:
+            self.log_reward_stats = False
 
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict]:
         if (
@@ -134,6 +140,9 @@ class JsbSimEnv(gym.Env):
             warnings.warn(
                 "If training, use NoFG instead of FG in the env_id. Using FG will cause errors while training after a while."
             )
+
+        if self.log_reward_stats: self.task.reset_reward_stats()
+
         return observation, info
 
     def _init_new_sim(self, dt, aircraft, initial_conditions):
@@ -150,8 +159,6 @@ class JsbSimEnv(gym.Env):
                 f'e.g. gym.make("{self.spec.id}", render_mode="human")'
             )
             return
-        
-        double_throttle = isinstance(self.task, AltitudeHoldTask) or isinstance(self.task, HdotHoldTask)
 
         """Renders the environment.
         The set of supported modes varies per environment. (And some
@@ -178,7 +185,7 @@ class JsbSimEnv(gym.Env):
         if self.render_mode == "human":
             if not self.figure_visualiser:
                 self.figure_visualiser = FigureVisualiser(
-                    self.sim, self.task.get_props_to_output(), double_throttle=double_throttle
+                    self.sim, self.task.get_props_to_output(), double_throttle=self.double_throttle
                 )
             self.figure_visualiser.plot(self.sim)
         elif self.render_mode == "flightgear":
@@ -189,7 +196,7 @@ class JsbSimEnv(gym.Env):
         elif self.render_mode == "human_fg":
             if not self.flightgear_visualiser:
                 self.flightgear_visualiser = FlightGearVisualiser(
-                    self.sim, self.task.get_props_to_output(), flightgear_blocking, double_throttle=double_throttle
+                    self.sim, self.task.get_props_to_output(), flightgear_blocking, double_throttle=self.double_throttle
                 )
             self.flightgear_visualiser.plot(self.sim)
         elif self.render_mode == "graph":

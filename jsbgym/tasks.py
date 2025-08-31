@@ -7,6 +7,7 @@ import enum
 import warnings
 from collections import namedtuple
 import jsbgym.properties as prp
+import jsbgym.throttle_task_params as params
 from jsbgym import assessors, rewards, utils
 from jsbgym.simulation import Simulation
 from jsbgym.properties import BoundedProperty, Property
@@ -642,31 +643,35 @@ class HdotHoldTask(FlightTask):
 
     task_name = "HdotHoldTask"
 
-    MIXTURE_CMD = 0.8
-    INITIAL_HEADING_DEG = 270
-    INITIAL_ALTITUDE_FT = 10000
-    INITIAL_SPEED_FPS = 650
-    DEFAULT_EPISODE_TIME_S = 240.0
-    TARGET_HDOT_RANGE = 40.0
-    HDOT_SCALING_FT = 150
-    MIN_STATE_QUALITY = 0.0  # terminate if state 'quality' is less than this
-    MAX_ALTITUDE_DEVIATION_FT = 10000  # terminate if altitude error exceeds this
-    MAX_HDOT_ERROR = 200 # ft/s
-    MAX_PSIDOT_ERROR = 0.03 * math.pi
+    MIXTURE_CMD = params.MIXTURE_CMD
+    INITIAL_HEADING_DEG = params.INITIAL_HEADING_DEG
+    INITIAL_ALTITUDE_FT = params.INITIAL_ALTITUDE_FT
+    INITIAL_SPEED_FPS = params.INITIAL_SPEED_FPS
+    DEFAULT_EPISODE_TIME_S = params.DEFAULT_EPISODE_TIME_S
+    TARGET_HDOT_RANGE = params.TARGET_HDOT_RANGE
+    TARGET_PHI_RANGE = params.TARGET_PHI_RANGE
+    MIN_STATE_QUALITY = params.MIN_STATE_QUALITY
+    MAX_ALTITUDE_DEVIATION_FT = params.MAX_ALTITUDE_DEVIATION_FT
+    MAX_HDOT_ERROR = params.MAX_HDOT_ERROR
+    MAX_PHI_ERROR = params.MAX_PHI_ERROR
 
-    gamma = 0.8
-    kappa = 0.1e-6
-    w_hdot = 1
-    w_psidot = 30
+    gamma = params.hdot_gamma
+    kappa_long = params.hdot_kappa_long
+    kappa_lat = params.hdot_kappa_lat
+    pot_delta_T_scale = params.pot_delta_T_scale
+    potential_offset = params.hdot_potential_offset
+    w_hdot = params.hdot_w_hdot
+    w_phi = params.hdot_w_phi
 
-    target_psidot_rads = BoundedProperty(
-        "target/psidot-rad-sec",
+    target_phi_rad = BoundedProperty(
+        "target/phi-rad-sec",
         "Desired heading rate [rad/sec]",
         -0.5,
         0.5,
     )
-    psidot_error_rads = BoundedProperty(
-        "error/psidot-error-rads",
+
+    phi_error_rad = BoundedProperty(
+        "error/phi-error-rad",
         "error to desired heading rate [rad/s]",
         -0.5,
         0.5
@@ -674,7 +679,7 @@ class HdotHoldTask(FlightTask):
 
     target_hdot_fps = BoundedProperty(
         "target/hdot-fps",
-        "desired hdot [fps]",
+        "Desired hdot [fps]",
         -1500,
         1500
     )
@@ -704,27 +709,40 @@ class HdotHoldTask(FlightTask):
         positive_rewards: bool = True,
     ):
         self.max_time_s = episode_time_s
-        episode_steps = math.ceil(self.max_time_s * step_frequency_hz)
+        self.episode_steps = math.ceil(self.max_time_s * step_frequency_hz)
         self.steps_left = BoundedProperty(
-            "info/steps_left", "steps remaining in episode", 0, episode_steps
+            "info/steps_left", "steps remaining in episode", 0, self.episode_steps
         )
         self.aircraft = aircraft
         self.positive_rewards = positive_rewards
 
         self.extra_state_variables = (
             self.hdot_error_fps,
-            self.psidot_error_rads,
+            self.phi_error_rad,
         )
         self.state_variables = FlightTask.base_state_variables + self.extra_state_variables
 
         self.target_hdot = 0
-        self.target_psidot_rads = 0
+        self.target_phi = 0
+        self.last_action = np.array([0.5, 0.5])
 
         self.prev_sim = None
-        self.reward_stats = {}
+        self.episode_length = 0
+        self.episode_stats = {"l": 0, "r": 0}
+        self.reset_reward_stats()
 
         assessor = self.make_assessor(shaping_type)
         super().__init__(assessor)
+
+    def reset_reward_stats(self):
+        self.reward_stats = {
+            "base_hdot_rew": 0,
+            "base_phi_rew": 0,
+            "base_rew": 0,
+            "potential_rew": 0,
+            "total_rew": 0,
+            "r": 0
+        }
 
     def make_assessor(self, shaping: Shaping) -> assessors.AssessorImpl:
         return assessors.AssessorImpl(
@@ -741,7 +759,7 @@ class HdotHoldTask(FlightTask):
                 state_variables=self.state_variables,
                 target=0.0,
                 is_potential_based=False,
-                scaling_factor=self.HDOT_SCALING_FT,
+                scaling_factor=0,
             ),
         )
 
@@ -763,13 +781,18 @@ class HdotHoldTask(FlightTask):
         return initial_conditions
 
     def _update_custom_properties(self, sim: Simulation) -> None:
+        sim[self.target_hdot_fps] = self.target_hdot
+        sim[self.target_phi_rad] = self.target_phi
+
         hdot_fps = sim[prp.altitude_rate_fps]
         error_fps = self.target_hdot - hdot_fps
         sim[self.hdot_error_fps] = error_fps
 
-        psidot_rads = sim[prp.psidot_rads]
-        error_rads = self.target_psidot_rads - psidot_rads
-        sim[self.psidot_error_rads] = error_rads
+        # phi_rad = sim[prp.phi_rad]
+        # error_rad = self.target_phi - phi_rad
+        roll_rad = sim[prp.roll_rad]
+        error_rad = self.target_phi - roll_rad
+        sim[self.phi_error_rad] = error_rad
 
         altitude_ft = sim[prp.altitude_sl_ft]
         error_ft = altitude_ft - self.INITIAL_ALTITUDE_FT
@@ -805,9 +828,11 @@ class HdotHoldTask(FlightTask):
         return (
             prp.u_fps,
             prp.altitude_sl_ft,
-            self.hdot_error_fps,
-            self.last_agent_reward,
-            self.last_assessment_reward,
+            prp.altitude_rate_fps,
+            self.target_hdot_fps,
+            # prp.phi_rad,
+            prp.roll_rad,
+            self.target_phi_rad,
             self.steps_left,
         )
 
@@ -827,40 +852,53 @@ class HdotHoldTask(FlightTask):
         terminated = self._is_terminal(sim)
         truncated = False
 
-        reward = self.calculate_reward(sim)
+        reward = self.calculate_reward(sim, action)
+
+        info = {"reward": reward,
+                "episode": self.episode_stats,
+                "curr_hdot": sim[prp.altitude_rate_fps],
+                "curr_phi": sim[prp.roll_rad],
+                "target_hdot": self.target_hdot,
+                "target_phi": self.target_phi}
 
         if terminated:
             reward = self._reward_terminal_override(reward, sim)
+            self.episode_stats = {"l": self.episode_steps-sim[self.steps_left], **self.reward_stats}
         if self.debug:
             self._validate_state(state, terminated, truncated, action, reward)
 
-        info = {"reward": reward}
-        # info["episode"] = self.reward_stats
-
         self.prev_sim = sim
+        self.last_action = action
 
         return state, reward, terminated, False, info
 
-    def calculate_reward(self, sim):
+    def calculate_reward(self, sim, action):
         if self.prev_sim is None: self.prev_sim = sim
 
         # Base reward
         hdot_penalty = self.w_hdot * (sim[self.hdot_error_fps] / self.MAX_HDOT_ERROR)**2
-        psidot_penalty = self.w_psidot * (sim[self.psidot_error_rads] / self.MAX_PSIDOT_ERROR)**2
-        base_reward = -(hdot_penalty + psidot_penalty)
+        phi_penalty = self.w_phi * (sim[self.phi_error_rad] / self.MAX_PHI_ERROR)**2
+        base_reward = -(hdot_penalty + phi_penalty)
         
         # Potentials
         phi_prev = self.potential(self.prev_sim)
         phi_curr = self.potential(sim)
-        potential_reward = self.kappa * (self.gamma * phi_curr - phi_prev)
-        
-        shaped_reward = base_reward + potential_reward
+        potential_reward = self.gamma * phi_curr - phi_prev
 
-        self.reward_stats = {"base_hdot_rew": -hdot_penalty,
-                             "base_psidot_rew": -hdot_penalty,
-                             "base_rew": base_reward,
-                             "potential_rew": potential_reward
-        }
+        # Lateral help part ()
+        delta_T_desired = self.pot_delta_T_scale * np.clip(self.target_phi / self.TARGET_PHI_RANGE, -1.0, 1.0)
+        delta_T_actual = action[0] - action[1]  # left - right (because left > right means right turn / positive roll)
+        lat_help = -self.kappa_lat * (delta_T_actual - delta_T_desired)**2
+        
+        shaped_reward = base_reward + lat_help + potential_reward + self.potential_offset
+
+        self.reward_stats["base_hdot_rew"] += -hdot_penalty
+        self.reward_stats["base_phi_rew"] += -phi_penalty
+        self.reward_stats["base_rew"] += base_reward
+        # self.reward_stats["potential_rew"] += potential_reward + self.potential_offset
+        self.reward_stats["potential_rew"] += phi_curr
+        self.reward_stats["total_rew"] += shaped_reward
+        self.reward_stats["r"] += shaped_reward
 
         return shaped_reward
     
@@ -868,16 +906,32 @@ class HdotHoldTask(FlightTask):
     def potential(self, sim):
         g = 9.81
         
+        # Longitudinal part (altitude rate)
         V = math.sqrt(sim[prp.u_fps]**2 + sim[prp.v_fps]**2 + sim[prp.w_fps]**2)
         Vdot = math.sqrt(sim[prp.ax_fps2]**2 + sim[prp.ay_fps2]**2 + sim[prp.az_fps2]**2)
         hdot = sim[prp.altitude_rate_fps]
 
         Edot     = g * hdot + V*Vdot
         Edot_cmd = g * self.target_hdot
-
-        phi_long = -((Edot-Edot_cmd)/g)**2
+        phi_long = -self.kappa_long * ((Edot-Edot_cmd)/g)**2
 
         return phi_long
     
     def set_gamma(self, gamma):
         self.gamma = gamma
+
+class HeadingAndAltitudeRateTask(HdotHoldTask):
+    kappa_long = params.hdot_phi_kappa_long
+    kappa_lat = params.hdot_phi_kappa_lat
+    potential_offset = params.hdot_phi_potential_offset
+    w_hdot = params.hdot_phi_w_hdot
+    w_phi = params.hdot_phi_w_phi
+
+    def _new_episode_init(self, sim: Simulation) -> None:
+        super()._new_episode_init(sim)
+        sim.set_throttle_mixture_controls(0.8, self.MIXTURE_CMD)
+
+        self.target_hdot = random.uniform(-self.TARGET_HDOT_RANGE, self.TARGET_HDOT_RANGE)
+        self.target_phi = random.uniform(-self.TARGET_PHI_RANGE, self.TARGET_PHI_RANGE)
+
+        sim[self.steps_left] = self.steps_left.max

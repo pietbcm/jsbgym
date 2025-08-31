@@ -25,6 +25,7 @@ pitch_rad = BoundedProperty(
 roll_rad = BoundedProperty("attitude/roll-rad", "roll [rad]", -math.pi, math.pi)
 heading_deg = BoundedProperty("attitude/psi-deg", "heading [deg]", 0, 360)
 sideslip_deg = BoundedProperty("aero/beta-deg", "sideslip [deg]", -180, +180)
+sideslip_rad = BoundedProperty("aero/beta-rad", "sideslip [rad]", -math.pi, math.pi)
 lat_geod_deg = BoundedProperty(
     "position/lat-geod-deg", "geocentric latitude [deg]", -90, 90
 )
